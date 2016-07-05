@@ -84,12 +84,14 @@ func (p *Ping) Gather(acc telegraf.Accumulator) error {
 					strings.TrimSpace(out) + ", " + err.Error())
 			}
 			tags := map[string]string{"url": u}
-			trans, rec, avg, err := processPingOutput(out)
+			cname, ip, trans, rec, avg, err := processPingOutput(out)
 			if err != nil {
 				// fatal error
 				errorChannel <- err
 				return
 			}
+			tags["cname"] = cname
+			tags["ip"] = ip
 			// Calculate packet loss percentage
 			loss := float64(trans-rec) / float64(trans) * 100.0
 			fields := map[string]interface{}{
@@ -165,10 +167,11 @@ func (p *Ping) args(url string) []string {
 //     2 packets transmitted, 2 packets received, 0.0% packet loss
 //     round-trip min/avg/max/stddev = 34.843/43.508/52.172/8.664 ms
 //
-// It returns (<transmitted packets>, <received packets>, <average response>)
-func processPingOutput(out string) (int, int, float64, error) {
+// It returns (<cname>, <ip>, <transmitted packets>, <received packets>, <average response>)
+func processPingOutput(out string) (string, string, int, int, float64, error) {
 	var trans, recv int
 	var avg float64
+	var cname, ip string
 	// Set this error to nil if we find a 'transmitted' line
 	err := errors.New("Fatal error processing ping output")
 	lines := strings.Split(out, "\n")
@@ -180,22 +183,26 @@ func processPingOutput(out string) (int, int, float64, error) {
 			// Transmitted packets
 			trans, err = strconv.Atoi(strings.Split(stats[0], " ")[0])
 			if err != nil {
-				return trans, recv, avg, err
+				return cname, ip, trans, recv, avg, err
 			}
 			// Received packets
 			recv, err = strconv.Atoi(strings.Split(stats[1], " ")[0])
 			if err != nil {
-				return trans, recv, avg, err
+				return cname, ip, trans, recv, avg, err
 			}
 		} else if strings.Contains(line, "min/avg/max") {
 			stats := strings.Split(line, " = ")[1]
 			avg, err = strconv.ParseFloat(strings.Split(stats, "/")[1], 64)
 			if err != nil {
-				return trans, recv, avg, err
+				return cname, ip, trans, recv, avg, err
 			}
+		} else if strings.HasPrefix(line, "PING") {
+			parts := strings.Split(line, " ")
+			cname = parts[1]
+			ip = strings.Trim(parts[2], "()")
 		}
 	}
-	return trans, recv, avg, err
+	return cname, ip, trans, recv, avg, err
 }
 
 func init() {
